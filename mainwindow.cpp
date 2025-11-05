@@ -6,6 +6,9 @@
 #include <QFont>
 
 const QString LEADERBOARD_FILE = "leaderboard.dat";
+const int SCORE_TO_UNLOCK_MEDIUM = 500;
+const int SCORE_TO_UNLOCK_HARD = 1000;
+const int SCORE_TO_UNLOCK_NIGHTMARE = 2000;
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -16,13 +19,26 @@ MainWindow::MainWindow(QWidget *parent)
     instructions_label = new QLabel(ui->frame);
     instructions_label->setVisible(false);
 
-    ui->difficulty_comboBox->blockSignals(true);
-    ui->difficulty_comboBox->addItems({"Easy", "Medium", "Hard", "NIGHTMARE"});
-    ui->difficulty_comboBox->blockSignals(false);
+    // DO NOT add items to the combo box here anymore.
+    // The original ui->difficulty_comboBox->addItems(...) line MUST be deleted.
+
+    // --- NEW LOGIC ---
+    campaignProgress = 0;
+    currentMode = Arcade; // Default to Arcade
+
+    // Connect the radio buttons from the .ui file
+    connect(ui->arcadeModeButton, &QRadioButton::toggled, this, &MainWindow::onGameModeChanged);
+    connect(ui->campaignModeButton, &QRadioButton::toggled, this, &MainWindow::onGameModeChanged);
+
+    // Set the initial state of the difficulty dropdown
+    // This will populate the combo box for Arcade mode
+    updateDifficultyComboBox();
+    // -----------------
 
     gameTimer = new QTimer(this);
     connect(gameTimer, &QTimer::timeout, this, &MainWindow::gameLoop);
 
+    // Now it is safe to call resetGame() for the first time
     resetGame();
 }
 
@@ -44,27 +60,46 @@ void MainWindow::resetGame()
     worldWidth = ui->frame->width() / gridSize;
     worldHeight = ui->frame->height() / gridSize;
 
+    playerHealth = 5;
+    maxPlayerHealth = 5;
+    powerupThreshold = 3;
+    asteroidSpawnChance = 10;
+    enemyShipSpawnChance = 2;
+    enemyFireChance = 5;
+
     int difficulty = ui->difficulty_comboBox->currentIndex();
     switch(difficulty) {
-    case 0:
+    case 0: // Easy
         playerHealth = 5;
         maxPlayerHealth = 5;
         powerupThreshold = 2;
+        asteroidSpawnChance = 7;
+        enemyShipSpawnChance = 1;
+        enemyFireChance = 3;
         break;
-    case 1:
+    case 1: // Medium
         playerHealth = 3;
         maxPlayerHealth = 3;
         powerupThreshold = 3;
+        asteroidSpawnChance = 10;
+        enemyShipSpawnChance = 2;
+        enemyFireChance = 5;
         break;
-    case 2:
+    case 2: // Hard
         playerHealth = 2;
         maxPlayerHealth = 2;
         powerupThreshold = 4;
+        asteroidSpawnChance = 13;
+        enemyShipSpawnChance = 3;
+        enemyFireChance = 7;
         break;
-    case 3:
+    case 3: // NIGHTMARE
         playerHealth = 1;
         maxPlayerHealth = 1;
         powerupThreshold = 5;
+        asteroidSpawnChance = 16;
+        enemyShipSpawnChance = 4;
+        enemyFireChance = 10;
         break;
     }
     ui->health_label_value->setText(QString::number(playerHealth));
@@ -119,7 +154,25 @@ void MainWindow::on_startGame_button_clicked()
         if(playerHealth <= 0){
             resetGame();
         }
+        // --- ADD THIS SECTION ---
+        // Show a pop-up with the goal in Campaign mode
+        if (currentMode == Campaign && campaignProgress < 3) {
+            int scoreNeeded = 0;
+            QString levelName;
+            if (campaignProgress == 0) {
+                scoreNeeded = SCORE_TO_UNLOCK_MEDIUM;
+                levelName = "Medium";
+            } else if (campaignProgress == 1) {
+                scoreNeeded = SCORE_TO_UNLOCK_HARD;
+                levelName = "Hard";
+            } else if (campaignProgress == 2) {
+                scoreNeeded = SCORE_TO_UNLOCK_NIGHTMARE;
+                levelName = "NIGHTMARE";
+            }
 
+            QMessageBox::information(this, "Campaign Goal",
+                                     QString("You must score at least %1 points on this level to unlock %2.").arg(scoreNeeded).arg(levelName));
+        }
         instructions_label->setVisible(false);
 
         gameRunning = true;
@@ -136,7 +189,13 @@ void MainWindow::on_startGame_button_clicked()
     }
 }
 
-void MainWindow::on_reset_button_clicked() { resetGame(); }
+void MainWindow::on_reset_button_clicked() {
+    if (currentMode == Campaign) {
+        campaignProgress = 0;
+        updateDifficultyComboBox(); // Re-lock the combo box
+    }
+    resetGame();
+}
 void MainWindow::on_spinBox_gridSize_valueChanged(int arg1) { Q_UNUSED(arg1); resetGame(); }
 void MainWindow::on_difficulty_comboBox_currentIndexChanged(int index) { Q_UNUSED(index); resetGame(); }
 
@@ -148,17 +207,33 @@ void MainWindow::on_leaderboard_button_clicked()
 void MainWindow::on_instructions_button_clicked()
 {
     QString instructionsText =
-        "Controls:\n"
+        "--- GAME MODES ---\n\n"
+        "**ARCADE MODE:**\n"
+        "* Play any difficulty level you want.\n"
+        "* Your scores are saved to the Leaderboard!\n"
+        "* This is the classic, endless high-score experience.\n\n"
+        "**CAMPAIGN MODE:**\n"
+        "* Start at 'Easy' and unlock harder levels.\n"
+        "* You must reach a target score to unlock the next level:\n"
+        "    - Unlock Medium: 500 points on Easy\n"
+        "    - Unlock Hard: 1000 points on Medium\n"
+        "    - Unlock NIGHTMARE: 2000 points on Hard\n"
+        "* This mode does NOT save to the leaderboard.\n"
+        "* Your progress resets if you close the game or press 'Reset'.\n\n"
+        "--- CONTROLS ---\n\n"
         "  A / Left Arrow : Move Left\n"
         "  D / Right Arrow : Move Right\n"
         "  Space / Enter : Shoot Laser (Cyan)\n\n"
-        "Hazards:\n"
+        "--- HAZARDS ---\n\n"
         "  Asteroids (Gray): Fall straight down. Shoot them for 10 points.\n"
-        "  Enemy Ships (Red): Move side to side and shoot lasers (Yellow).\n  Shoot them for 50 points.\n"
+        "  Enemy Ships (Red): Move side to side and shoot lasers (Yellow).\n"
+        "  Shoot them for 50 points.\n"
         "  Enemy Lasers (Yellow): Travel downwards.\n\n"
-        "Power-ups:\n"
-        "  Health (Pink/Flashing): Falls slowly after enough enemies are destroyed.\n  Cannot be shot. Restores 1 health (up to max) and gives 100 points.\n\n"
-        "Goal: Survive as long as possible and get a high score!";
+        "--- POWER-UPS ---\n\n"
+        "  Health (Pink/Flashing): Falls slowly after enough enemies are destroyed.\n"
+        "  Cannot be shot. Restores 1 health (up to max) and gives 100 points.\n\n"
+        "--- GOAL ---\n\n"
+        "Survive as long as possible and get a high score!";
 
     QMessageBox::information(this, "Instructions", instructionsText);
 }
@@ -228,7 +303,7 @@ void MainWindow::updatePositions()
         if (enemyShips[i].position.x() - 1 <= 0 || enemyShips[i].position.x() + 1 >= worldWidth - 1) {
             enemyShips[i].direction *= -1;
         }
-        if (QRandomGenerator::global()->bounded(100) < 5) {
+        if (QRandomGenerator::global()->bounded(100) < enemyFireChance) {
             enemyLasers.append(QPoint(enemyShips[i].position.x(), enemyShips[i].position.y() + 1));
         }
     }
@@ -259,11 +334,12 @@ void MainWindow::updatePositions()
 
 void MainWindow::spawnEnemies()
 {
-    if (QRandomGenerator::global()->bounded(100) < 10) {
+    if (QRandomGenerator::global()->bounded(100) < asteroidSpawnChance) {
         int spawnX = QRandomGenerator::global()->bounded(worldWidth);
         asteroids.append(QPoint(spawnX, 0));
     }
-    if (QRandomGenerator::global()->bounded(100) < 2) {
+
+    if (QRandomGenerator::global()->bounded(100) < enemyShipSpawnChance) {
         int spawnX = QRandomGenerator::global()->bounded(1, worldWidth - 2);
         int spawnY = QRandomGenerator::global()->bounded(worldHeight / 4);
         enemyShips.append({QPoint(spawnX, spawnY), 1});
@@ -303,12 +379,18 @@ void MainWindow::handlePlayerHit()
     if (playerHealth <= 0) {
         gameRunning = false;
         gameTimer->stop();
+        if (currentMode == Campaign) {
+            checkForCampaignUnlock();
+        }
         promptForLeaderboard();
     }
 }
 
 void MainWindow::promptForLeaderboard()
 {
+    if (currentMode == Campaign) {
+        return;
+    }
     if (playerScore == 0 && killCount == 0) return;
 
     bool ok;
@@ -641,5 +723,110 @@ void MainWindow::drawBlockyText(QPainter &painter, const QString& text, int star
             currentX += 4;
             break;
         }
+    }
+}
+
+/**
+ * @brief Slot triggered when a game mode radio button is toggled.
+ */
+void MainWindow::onGameModeChanged()
+{
+    // Check which button is now active
+    if (ui->arcadeModeButton->isChecked()) {
+        currentMode = Arcade;
+    } else {
+        currentMode = Campaign;
+        campaignProgress = 0;
+    }
+
+    // Update the difficulty combo box to reflect new mode's rules
+    updateDifficultyComboBox();
+
+    // Reset the game to apply changes
+    resetGame();
+}
+
+/**
+ * @brief Updates the difficulty combo box based on game mode and progress.
+ */
+void MainWindow::updateDifficultyComboBox()
+{
+    // CRITICAL: Block signals to prevent resetGame() from
+    // being called when we clear() the combo box.
+    ui->difficulty_comboBox->blockSignals(true);
+    ui->difficulty_comboBox->clear();
+
+    if (currentMode == Arcade) {
+        // Arcade mode has all levels unlocked
+        ui->difficulty_comboBox->addItems({"Easy", "Medium", "Hard", "NIGHTMARE"});
+        ui->difficulty_comboBox->setEnabled(true);
+        ui->difficulty_comboBox->setCurrentIndex(0); // Default to Easy
+    } else {
+        // Campaign mode unlocks levels progressively
+        ui->difficulty_comboBox->addItem("Easy");
+        if (campaignProgress >= 1) ui->difficulty_comboBox->addItem("Medium");
+        if (campaignProgress >= 2) ui->difficulty_comboBox->addItem("Hard");
+        if (campaignProgress >= 3) ui->difficulty_comboBox->addItem("NIGHTMARE");
+
+        if (campaignProgress < 3) {
+            // If not all levels are unlocked, lock to the highest available
+            ui->difficulty_comboBox->setCurrentIndex(campaignProgress);
+            ui->difficulty_comboBox->setEnabled(false); // Disable dropdown
+        } else {
+            // All levels unlocked, allow user to choose
+            ui->difficulty_comboBox->setEnabled(true);
+            ui->difficulty_comboBox->setCurrentIndex(campaignProgress); // Default to highest
+        }
+    }
+
+    // CRITICAL: Unblock signals now that we are done
+    ui->difficulty_comboBox->blockSignals(false);
+}
+
+/**
+ * @brief Checks if the player's score is high enough to unlock the next level.
+ */
+void MainWindow::checkForCampaignUnlock()
+{
+    int currentDifficulty = ui->difficulty_comboBox->currentIndex();
+    int newProgress = campaignProgress;
+    bool unlocked = false;
+    QString nextLevelName;
+
+    // Check for unlock only if we just played the highest unlocked level
+    if (currentDifficulty == campaignProgress && campaignProgress < 3) {
+        if (currentDifficulty == 0 && playerScore >= SCORE_TO_UNLOCK_MEDIUM) {
+            newProgress = 1; // Unlock Medium
+            nextLevelName = "Medium";
+            unlocked = true;
+        } else if (currentDifficulty == 1 && playerScore >= SCORE_TO_UNLOCK_HARD) {
+            newProgress = 2; // Unlock Hard
+            nextLevelName = "Hard";
+            unlocked = true;
+        } else if (currentDifficulty == 2 && playerScore >= SCORE_TO_UNLOCK_NIGHTMARE) {
+            newProgress = 3; // Unlock Nightmare
+            nextLevelName = "NIGHTMARE";
+            unlocked = true;
+        }
+    }
+
+    if (unlocked) {
+        campaignProgress = newProgress;
+
+        // Notify player
+        QMessageBox::information(this, "Level Unlocked!",
+                                 QString("Congratulations! You scored %1 points and unlocked the %2 difficulty level!").arg(playerScore).arg(nextLevelName));
+
+        // Update the UI to reflect the unlock
+        updateDifficultyComboBox();
+    } else if (currentDifficulty == campaignProgress && campaignProgress < 3) {
+        // Player failed to unlock the next level
+        int scoreNeeded = 0;
+        if (currentDifficulty == 0) scoreNeeded = SCORE_TO_UNLOCK_MEDIUM;
+        if (currentDifficulty == 1) scoreNeeded = SCORE_TO_UNLOCK_HARD;
+        if (currentDifficulty == 2) scoreNeeded = SCORE_TO_UNLOCK_NIGHTMARE;
+
+        QMessageBox::information(this, "Game Over",
+                                 QString("You scored %1 points. You need %2 points on this level to unlock the next one.").arg(playerScore).arg(scoreNeeded));
     }
 }

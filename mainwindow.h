@@ -17,6 +17,11 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
+enum GameMode {
+    Arcade,
+    Campaign
+};
+
 struct EnemyShip {
     QPoint position;
     int direction;
@@ -46,6 +51,7 @@ private slots:
     void on_instructions_button_clicked();
     void on_about_button_clicked(); // Added slot
     void gameLoop();
+    void onGameModeChanged();
 
 private:
     Ui::MainWindow *ui;
@@ -62,6 +68,11 @@ private:
     int enemiesDestroyedCount;
     int powerupThreshold;
     int maxPlayerHealth;
+    int asteroidSpawnChance;
+    int enemyShipSpawnChance;
+    int enemyFireChance;
+    GameMode currentMode;      // Stores whether we are in Arcade or Campaign
+    int campaignProgress;
 
     QPoint playerPosition;
     QVector<QPoint> asteroids;
@@ -81,6 +92,8 @@ private:
     void promptForLeaderboard();
     void saveScore(const QString& name, int score, int kills, const QString& difficulty);
     void displayLeaderboard();
+    void updateDifficultyComboBox();
+    void checkForCampaignUnlock();
 
     QVector<QPoint> getPlayerShipCells() const;
     QVector<QPoint> getEnemyShipCells(const EnemyShip& ship) const;
